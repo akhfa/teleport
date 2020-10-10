@@ -25,12 +25,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gravitational/teleport/lib/auth"
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/events"
 	"github.com/gravitational/teleport/lib/httplib"
 	"github.com/gravitational/teleport/lib/reversetunnel"
 	"github.com/gravitational/teleport/lib/services"
+	"github.com/gravitational/teleport/lib/tlsca"
 	"github.com/gravitational/teleport/lib/utils"
 	"github.com/gravitational/teleport/lib/web/app"
 	"github.com/gravitational/teleport/lib/web/ui"
@@ -95,31 +95,31 @@ func (h *Handler) createAppSession(w http.ResponseWriter, r *http.Request, p htt
 
 	log.Debugf("Attempting to create application session for %v in %v.", result.PublicAddr, result.ClusterName)
 
-	// Get a client connected to either to local auth or remote auth with the
-	// users identity.
-	var userClient auth.ClientI
-	if result.ClusterName == h.cfg.DomainName {
-		userClient, err = ctx.GetClient()
-	} else {
-		remoteClient, err := h.cfg.Proxy.GetSite(result.ClusterName)
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-		userClient, err = ctx.GetUserClient(remoteClient)
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-	}
+	//// Get a client connected to either to local auth or remote auth with the
+	//// users identity.
+	//var userClient auth.ClientI
+	//if result.ClusterName == h.cfg.DomainName {
+	//	userClient, err = ctx.GetClient()
+	//} else {
+	//	remoteClient, err := h.cfg.Proxy.GetSite(result.ClusterName)
+	//	if err != nil {
+	//		return nil, trace.Wrap(err)
+	//	}
+	//	userClient, err = ctx.GetUserClient(remoteClient)
+	//	if err != nil {
+	//		return nil, trace.Wrap(err)
+	//	}
+	//}
 
-	// Attempt to create an application session within whichever cluster the
-	// user requested. This requests goes to the root (or leaf) auth cluster
-	// where access to the application is checked.
-	appSession, err := userClient.CreateAppSession(r.Context(), services.CreateAppSessionRequest{
-		PublicAddr: result.PublicAddr,
-	})
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
+	//// Attempt to create an application session within whichever cluster the
+	//// user requested. This requests goes to the root (or leaf) auth cluster
+	//// where access to the application is checked.
+	//appSession, err := userClient.CreateAppSession(r.Context(), services.CreateAppSessionRequest{
+	//	PublicAddr: result.PublicAddr,
+	//})
+	//if err != nil {
+	//	return nil, trace.Wrap(err)
+	//}
 
 	// Get a client connected to the local auth server with the users identity.
 	localClient, err := ctx.GetClient()
@@ -128,14 +128,25 @@ func (h *Handler) createAppSession(w http.ResponseWriter, r *http.Request, p htt
 	}
 
 	// Create an application web session within the cluster the request arrived.
-	webSession, err := localClient.CreateAppWebSession(r.Context(), services.CreateAppWebSessionRequest{
+	ws, err := localClient.CreateAppWebSession(r.Context(), services.CreateAppWebSessionRequest{
 		Username:      ctx.GetUser(),
 		ParentSession: ctx.sess.GetName(),
-		AppSessionID:  appSession.GetName(),
-		Expires:       appSession.Expiry(),
-		ServerID:      result.ServerID,
-		ClusterName:   result.ClusterName,
+		//AppSessionID:  appSession.GetName(),
+		//Expires:       appSession.Expiry(),
+		//ServerID:      result.ServerID,
+		PublicAddr:  result.PublicAddr,
+		ClusterName: result.ClusterName,
 	})
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	// Extract the identity of the user.
+	certificate, err := tlsca.ParseCertificatePEM(ws.GetTLSCert())
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	identity, err := tlsca.FromSubject(certificate.Subject, certificate.NotAfter)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -143,9 +154,9 @@ func (h *Handler) createAppSession(w http.ResponseWriter, r *http.Request, p htt
 	// Block and wait a few seconds for the session that was created to show up
 	// in the cache. This is to prevent a racy session creation loop.
 	err = h.waitForSession(r.Context(), services.GetAppWebSessionRequest{
-		Username:   webSession.GetUser(),
-		ParentHash: webSession.GetParentHash(),
-		SessionID:  webSession.GetName(),
+		//Username:   webSession.GetUser(),
+		//ParentHash: webSession.GetParentHash(),
+		SessionID: ws.GetName(),
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -162,15 +173,16 @@ func (h *Handler) createAppSession(w http.ResponseWriter, r *http.Request, p htt
 			ServerNamespace: defaults.Namespace,
 		},
 		SessionMetadata: events.SessionMetadata{
-			SessionID: appSession.GetName(),
+			SessionID: identity.RouteToApp.SessionID,
 		},
 		UserMetadata: events.UserMetadata{
-			User: webSession.GetUser(),
+			User: ws.GetUser(),
 		},
 		ConnectionMetadata: events.ConnectionMetadata{
 			RemoteAddr: r.RemoteAddr,
 		},
-		PublicAddr: appSession.GetPublicAddr(),
+		//PublicAddr: appSession.GetPublicAddr(),
+		PublicAddr: result.PublicAddr,
 	}
 	if err := h.cfg.Emitter.EmitAuditEvent(h.cfg.Context, appSessionStartEvent); err != nil {
 		return nil, trace.Wrap(err)
@@ -178,9 +190,9 @@ func (h *Handler) createAppSession(w http.ResponseWriter, r *http.Request, p htt
 
 	// Marshal cookie from application web session.
 	appCookie := app.Cookie{
-		Username:   webSession.GetUser(),
-		ParentHash: webSession.GetParentHash(),
-		SessionID:  webSession.GetName(),
+		//Username:   webSession.GetUser(),
+		//ParentHash: webSession.GetParentHash(),
+		SessionID: ws.GetName(),
 	}
 	appCookieValue, err := app.EncodeCookie(&appCookie)
 	if err != nil {

@@ -411,6 +411,10 @@ func (s *localSite) getRemoteConn(params DialParams) (*remoteConn, error) {
 		}
 	}
 
+	//for k, _ := range s.remoteConns {
+	//	fmt.Printf("--> Have key: %v.\n", k)
+	//}
+
 	key := connKey{
 		uuid:     params.ServerID,
 		connType: params.ConnType,

@@ -19,6 +19,7 @@ package auth
 import (
 	"context"
 	"crypto/x509"
+	"fmt"
 
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/lib"
@@ -143,6 +144,8 @@ func registerThroughProxy(token string, params RegisterParams) (*Identity, error
 	if len(params.Servers) == 0 {
 		return nil, trace.BadParameter("no auth servers set")
 	}
+
+	fmt.Printf("--> proxy reg: dnsname: %v.\n", params.DNSNames)
 
 	keys, err := params.GetHostCredentials(context.Background(),
 		params.Servers[0].String(),

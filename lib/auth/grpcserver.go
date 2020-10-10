@@ -720,9 +720,9 @@ func (g *GRPCServer) GetAppWebSession(ctx context.Context, req *proto.GetAppWebS
 	}
 
 	session, err := auth.GetAppWebSession(ctx, services.GetAppWebSessionRequest{
-		Username:   req.GetUsername(),
-		ParentHash: req.GetParentHash(),
-		SessionID:  req.GetSessionID(),
+		//Username:   req.GetUsername(),
+		//ParentHash: req.GetParentHash(),
+		SessionID: req.GetSessionID(),
 	})
 	if err != nil {
 		return nil, trail.ToGRPC(err)
@@ -774,10 +774,11 @@ func (g *GRPCServer) CreateAppWebSession(ctx context.Context, req *proto.CreateA
 	session, err := auth.CreateAppWebSession(ctx, services.CreateAppWebSessionRequest{
 		Username:      req.GetUsername(),
 		ParentSession: req.GetParentSession(),
-		AppSessionID:  req.GetAppSessionID(),
-		ServerID:      req.GetServerID(),
-		ClusterName:   req.GetClusterName(),
-		Expires:       req.GetExpires(),
+		//AppSessionID:  req.GetAppSessionID(),
+		//ServerID:      req.GetServerID(),
+		PublicAddr:  req.GetPublicAddr(),
+		ClusterName: req.GetClusterName(),
+		//Expires:       req.GetExpires(),
 	})
 	if err != nil {
 		return nil, trail.ToGRPC(err)
@@ -800,9 +801,9 @@ func (g *GRPCServer) DeleteAppWebSession(ctx context.Context, req *proto.DeleteA
 	}
 
 	if err := auth.DeleteAppWebSession(ctx, services.DeleteAppWebSessionRequest{
-		Username:   req.GetUsername(),
-		ParentHash: req.GetParentHash(),
-		SessionID:  req.GetSessionID(),
+		//Username:   req.GetUsername(),
+		//ParentHash: req.GetParentHash(),
+		SessionID: req.GetSessionID(),
 	}); err != nil {
 		return nil, trail.ToGRPC(err)
 	}

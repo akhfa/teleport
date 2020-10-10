@@ -49,9 +49,9 @@ func (h *Handler) handleFragment(w http.ResponseWriter, r *http.Request) error {
 			return trace.Wrap(err)
 		}
 		_, err = h.c.AccessPoint.GetAppWebSession(r.Context(), services.GetAppWebSessionRequest{
-			Username:   cookie.Username,
-			ParentHash: cookie.ParentHash,
-			SessionID:  cookie.SessionID,
+			//Username:   cookie.Username,
+			//ParentHash: cookie.ParentHash,
+			SessionID: cookie.SessionID,
 		})
 		if err != nil {
 			return trace.Wrap(err)

@@ -27,9 +27,9 @@ import (
 
 func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request, session services.WebSession) error {
 	err := h.c.AuthClient.DeleteAppWebSession(context.Background(), services.DeleteAppWebSessionRequest{
-		Username:   session.GetUser(),
-		ParentHash: session.GetParentHash(),
-		SessionID:  session.GetName(),
+		//Username:   session.GetUser(),
+		//ParentHash: session.GetParentHash(),
+		SessionID: session.GetName(),
 	})
 	if err != nil {
 		return trace.Wrap(err)

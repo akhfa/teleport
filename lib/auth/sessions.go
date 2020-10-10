@@ -93,10 +93,20 @@ func (s *AuthServer) CreateAppWebSession(ctx context.Context, req services.Creat
 		return nil, trace.Wrap(err)
 	}
 
-	// Set the TTL to be no longer than what is allowed by the role within the
-	// root cluster. This means even if a leaf cluster allows a longer login,
-	// the session will be shorter.
-	ttl := checker.AdjustSessionTTL(req.Expires.Sub(s.clock.Now()))
+	app, _, err := s.getApp(ctx, req.PublicAddr)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	// Don't let the TTL of the child certificate go longer than the parent.
+	ttl := checker.AdjustSessionTTL(parentSession.GetExpiryTime().Sub(s.clock.Now()))
+
+	// Generate a JWT that can be re-used during the lifetime of this
+	// session to pass authentication information to the target application.
+	jwt, err := s.generateJWT(user.GetName(), user.GetRoles(), app.URI, parentSession.GetExpiryTime())
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
 
 	// Generate certificate for this session.
 	privateKey, publicKey, err := s.GetNewKeyPairFromPool()
@@ -112,7 +122,11 @@ func (s *AuthServer) CreateAppWebSession(ctx context.Context, req services.Creat
 		traits: wrappers.Traits(map[string][]string{
 			teleport.TraitLogins: []string{uuid.New()},
 		}),
-		ttl: ttl,
+		usage:          []string{teleport.UsageAppsOnly},
+		appSessionID:   uuid.New(),
+		appPublicAddr:  req.PublicAddr,
+		appClusterName: req.ClusterName,
+		ttl:            ttl,
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -129,12 +143,13 @@ func (s *AuthServer) CreateAppWebSession(ctx context.Context, req services.Creat
 		Pub:     certs.ssh,
 		TLSCert: certs.tls,
 		Expires: s.clock.Now().Add(ttl),
+		JWT:     jwt,
 
 		// Application specific fields.
-		ParentHash:  services.SessionHash(parentSession.GetName()),
-		ServerID:    req.ServerID,
-		ClusterName: req.ClusterName,
-		SessionID:   req.AppSessionID,
+		//ParentHash: services.SessionHash(parentSession.GetName()),
+		//ServerID:    req.ServerID,
+		//ClusterName: req.ClusterName,
+		//SessionID:   req.AppSessionID,
 	})
 	if err = s.Identity.UpsertAppWebSession(ctx, session); err != nil {
 		return nil, trace.Wrap(err)

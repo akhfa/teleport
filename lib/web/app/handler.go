@@ -27,7 +27,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gravitational/oxy/forward"
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/lib/auth"
 	"github.com/gravitational/teleport/lib/defaults"
@@ -80,9 +79,6 @@ type Handler struct {
 
 	log *logrus.Entry
 
-	//tr http.RoundTripper
-	tr *http.Transport
-
 	mu    sync.Mutex
 	cache *ttlmap.TTLMap
 }
@@ -90,13 +86,6 @@ type Handler struct {
 // NewHandler returns a new application handler.
 func NewHandler(c *HandlerConfig) (*Handler, error) {
 	if err := c.CheckAndSetDefaults(); err != nil {
-		return nil, trace.Wrap(err)
-	}
-
-	// Create a http.RoundTripper that is used to cache and limit transport
-	// connections over the reverse tunnel subsystem.
-	tr, err := newTransport(c.ProxyClient)
-	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
@@ -111,7 +100,6 @@ func NewHandler(c *HandlerConfig) (*Handler, error) {
 		log: logrus.WithFields(logrus.Fields{
 			trace.Component: teleport.ComponentAppProxy,
 		}),
-		tr:    tr,
 		cache: cache,
 	}, nil
 
@@ -191,30 +179,30 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) error {
 		}
 	case "/x-teleport-logout":
 		// Authenticate the session based off the session cookie.
-		session, err := h.authenticate(r.Context(), r)
+		ws, err := h.authenticate(r.Context(), r)
 		if err != nil {
 			return trace.Wrap(err)
 		}
 
-		if err := h.handleLogout(w, r, session); err != nil {
+		if err := h.handleLogout(w, r, ws); err != nil {
 			return trace.Wrap(err)
 		}
 	default:
 		// Authenticate the session based off the session cookie.
-		session, err := h.authenticate(r.Context(), r)
+		ws, err := h.authenticate(r.Context(), r)
 		if err != nil {
 			return trace.Wrap(err)
 		}
 
 		// Fetch a cached request forwarder or create one if this is the first
 		// request (or the process has been restarted).
-		fwd, err := h.getSession(r.Context(), session)
+		session, err := h.getSession(r.Context(), ws)
 		if err != nil {
 			return trace.Wrap(err)
 		}
 
 		// Forward the request to the Teleport application proxy service.
-		fwd.ServeHTTP(w, r)
+		session.fwd.ServeHTTP(w, r)
 	}
 
 	return nil
@@ -234,9 +222,9 @@ func (h *Handler) authenticate(ctx context.Context, r *http.Request) (services.W
 	// to logout and invalidate their application session immediately. This
 	// lookup should also be fast because it's in the local cache.
 	session, err := h.c.AccessPoint.GetAppWebSession(ctx, services.GetAppWebSessionRequest{
-		Username:   cookie.Username,
-		ParentHash: cookie.ParentHash,
-		SessionID:  cookie.SessionID,
+		//Username:   cookie.Username,
+		//ParentHash: cookie.ParentHash,
+		SessionID: cookie.SessionID,
 	})
 	if err != nil {
 		h.log.Warnf("Failed to fetch application session: %v.", err)
@@ -247,21 +235,21 @@ func (h *Handler) authenticate(ctx context.Context, r *http.Request) (services.W
 }
 
 // cacheGet will fetch the forwarder from the cache.
-func (h *Handler) cacheGet(key string) (*forward.Forwarder, error) {
+func (h *Handler) cacheGet(key string) (*session, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if f, ok := h.cache.Get(key); ok {
-		if fwd, fok := f.(*forward.Forwarder); fok {
-			return fwd, nil
+	if s, ok := h.cache.Get(key); ok {
+		if sess, sok := s.(*session); sok {
+			return sess, nil
 		}
-		return nil, trace.BadParameter("invalid type stored in cache: %T", f)
+		return nil, trace.BadParameter("invalid type stored in cache: %T", s)
 	}
 	return nil, trace.NotFound("forwarder not found")
 }
 
 // cacheSet will add the forwarder to the cache.
-func (h *Handler) cacheSet(key string, value *forward.Forwarder, ttl time.Duration) error {
+func (h *Handler) cacheSet(key string, value *session, ttl time.Duration) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 

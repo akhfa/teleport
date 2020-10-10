@@ -94,11 +94,16 @@ type Identity struct {
 }
 
 type AppRoute struct {
-	SessionID   string
-	ServerID    string
-	PublicAddr  string
+	// SessionID is the identifier of the session. Similar to the SSH session ID,
+	// it is not secret information. It simply ties this session to a session in
+	// the Audit Log.
+	SessionID string
+	// PublicAddr is the public address of the application this certificate is
+	// issued for.
+	PublicAddr string
+	// ClusterName is the name of the cluster within which the application is
+	// running.
 	ClusterName string
-	JWT         string
 }
 
 // CheckAndSetDefaults checks and sets default values
@@ -127,10 +132,9 @@ var KubeUsersASN1ExtensionOID = asn1.ObjectIdentifier{1, 3, 9999, 1, 1}
 // license payload into certificates
 var KubeGroupsASN1ExtensionOID = asn1.ObjectIdentifier{1, 3, 9999, 1, 2}
 
-var AppServevIDASN1ExtensionOID = asn1.ObjectIdentifier{1, 3, 9999, 1, 4}
-var AppClusterNameASN1ExtensionOID = asn1.ObjectIdentifier{1, 3, 9999, 1, 5}
+var AppSessionIDASN1ExtensionOID = asn1.ObjectIdentifier{1, 3, 9999, 1, 4}
 var AppPublicAddrASN1ExtensionOID = asn1.ObjectIdentifier{1, 3, 9999, 1, 6}
-var AppJWTASN1ExtensionOID = asn1.ObjectIdentifier{1, 3, 9999, 1, 7}
+var AppClusterNameASN1ExtensionOID = asn1.ObjectIdentifier{1, 3, 9999, 1, 5}
 
 // Subject converts identity to X.509 subject name
 func (id *Identity) Subject() (pkix.Name, error) {
@@ -173,6 +177,29 @@ func (id *Identity) Subject() (pkix.Name, error) {
 			})
 	}
 
+	// Add in application routing information if provided.
+	if id.RouteToApp.SessionID != "" {
+		subject.ExtraNames = append(subject.ExtraNames,
+			pkix.AttributeTypeAndValue{
+				Type:  AppSessionIDASN1ExtensionOID,
+				Value: id.RouteToApp.SessionID,
+			})
+	}
+	if id.RouteToApp.PublicAddr != "" {
+		subject.ExtraNames = append(subject.ExtraNames,
+			pkix.AttributeTypeAndValue{
+				Type:  AppPublicAddrASN1ExtensionOID,
+				Value: id.RouteToApp.PublicAddr,
+			})
+	}
+	if id.RouteToApp.ClusterName != "" {
+		subject.ExtraNames = append(subject.ExtraNames,
+			pkix.AttributeTypeAndValue{
+				Type:  AppClusterNameASN1ExtensionOID,
+				Value: id.RouteToApp.ClusterName,
+			})
+	}
+
 	return subject, nil
 }
 
@@ -206,6 +233,21 @@ func FromSubject(subject pkix.Name, expires time.Time) (*Identity, error) {
 			val, ok := attr.Value.(string)
 			if ok {
 				id.KubernetesGroups = append(id.KubernetesGroups, val)
+			}
+		case attr.Type.Equal(AppSessionIDASN1ExtensionOID):
+			val, ok := attr.Value.(string)
+			if ok {
+				id.RouteToApp.SessionID = val
+			}
+		case attr.Type.Equal(AppPublicAddrASN1ExtensionOID):
+			val, ok := attr.Value.(string)
+			if ok {
+				id.RouteToApp.PublicAddr = val
+			}
+		case attr.Type.Equal(AppClusterNameASN1ExtensionOID):
+			val, ok := attr.Value.(string)
+			if ok {
+				id.RouteToApp.ClusterName = val
 			}
 		}
 	}

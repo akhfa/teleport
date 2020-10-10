@@ -18,11 +18,12 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/gravitational/oxy/forward"
 	"github.com/gravitational/teleport"
@@ -39,21 +40,21 @@ type session struct {
 	fwd *forward.Forwarder
 }
 
-func (h *Handler) getSession(ctx context.Context, webSession services.WebSession) (*session, error) {
+func (h *Handler) getSession(ctx context.Context, ws services.WebSession) (*session, error) {
 	// If a cached session exists, return it right away.
-	session, err := h.cacheGet(webSession.GetName())
+	session, err := h.cacheGet(ws.GetName())
 	if err == nil {
 		return session, nil
 	}
 
 	// Create a new session with a forwarder in it.
-	session, err = h.newSession(webSession)
+	session, err = h.newSession(ctx, ws)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
 	// Put the session in the cache so the next request can use it.
-	err = h.cacheSet(webSession.GetName(), session, session.Expiry().Sub(h.c.Clock.Now()))
+	err = h.cacheSet(ws.GetName(), session, ws.Expiry().Sub(h.c.Clock.Now()))
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -61,9 +62,9 @@ func (h *Handler) getSession(ctx context.Context, webSession services.WebSession
 	return session, nil
 }
 
-func (h *Handler) newSession(webSession services.WebSession) (*session, error) {
+func (h *Handler) newSession(ctx context.Context, ws services.WebSession) (*session, error) {
 	// Extract the identity of the user.
-	certificate, err := tlsca.ParseCertificatePEM(webSession.GetTLSCert())
+	certificate, err := tlsca.ParseCertificatePEM(ws.GetTLSCert())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -72,26 +73,28 @@ func (h *Handler) newSession(webSession services.WebSession) (*session, error) {
 		return nil, trace.Wrap(err)
 	}
 
+	_, server, err := h.getApp(ctx, identity.RouteToApp.PublicAddr)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
 	// Create a http.RoundTripper that uses the x509 identity of the user.
-	transport, err := newTransport(identity, webSession)
+	transport, err := h.newTransport(identity, server, ws)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
 	// Create the forwarder.
 	fwder, err := newForwarder(forwarderConfig{
-		uri: fmt.Sprintf("https://%v.%v", session.GetServerID(), session.GetClusterName()),
-		//uri:       "https://" + teleport.APIDomain,
-		//uri:       "https://server04",
-		sessionID: session.GetSessionID(),
-		//tr:        h.tr,
-		tr:  tr,
+		uri: fmt.Sprintf("https://%v.%v", server.GetName(), identity.RouteToApp.ClusterName),
+		jwt: ws.GetJWT(),
+		tr:  transport,
 		log: h.log,
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	fwd, err = forward.New(
+	fwd, err := forward.New(
 		forward.RoundTripper(fwder),
 		forward.Rewriter(fwder),
 		forward.Logger(h.log))
@@ -106,10 +109,10 @@ func (h *Handler) newSession(webSession services.WebSession) (*session, error) {
 
 // forwarderConfig is the configuration for a forwarder.
 type forwarderConfig struct {
-	uri       string
-	sessionID string
-	tr        http.RoundTripper
-	log       *logrus.Entry
+	uri string
+	jwt string
+	tr  http.RoundTripper
+	log *logrus.Entry
 }
 
 // Check will valid the configuration of a forwarder.
@@ -117,8 +120,8 @@ func (c forwarderConfig) Check() error {
 	if c.uri == "" {
 		return trace.BadParameter("uri missing")
 	}
-	if c.sessionID == "" {
-		return trace.BadParameter("session ID missing")
+	if c.jwt == "" {
+		return trace.BadParameter("jwt missing")
 	}
 	if c.tr == nil {
 		return trace.BadParameter("round tripper missing")
@@ -157,7 +160,7 @@ func newForwarder(c forwarderConfig) (*forwarder, error) {
 
 func (f *forwarder) RoundTrip(r *http.Request) (*http.Response, error) {
 	// Update the target address of the request so it's forwarded correctly.
-	// Format is always serverID.clusterName.
+	// Format is always https://serverID.clusterName.
 	r.URL.Scheme = f.uri.Scheme
 	r.URL.Host = f.uri.Host
 
@@ -170,10 +173,9 @@ func (f *forwarder) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func (f *forwarder) Rewrite(r *http.Request) {
-	// Pass the application session ID to the application service in a header.
-	// This will be removed by the application proxy service before forwarding
-	// the request to the target application.
-	r.Header.Set(teleport.AppSessionIDHeader, f.c.sessionID)
+	// Add in JWT headers.
+	r.Header.Add(teleport.AppJWTHeader, f.c.jwt)
+	r.Header.Add(teleport.AppCFHeader, f.c.jwt)
 
 	// Remove the application specific session cookie from the header. This is
 	// done by first wiping out the "Cookie" header then adding back all cookies
@@ -192,38 +194,8 @@ func (f *forwarder) Rewrite(r *http.Request) {
 // newTransport creates a http.RoundTripper that uses the reverse tunnel
 // subsystem to build the connection. This allows re-use of the transports
 // connection pooling logic instead of needing to write and maintain our own.
-func newTransport(proxyClient reversetunnel.Server) (*http.Transport, error) {
-	//ca, err := h.c.AuthClient.GetCertAuthority(services.CertAuthID{
-	//	Type:       services.HostCA,
-	//	DomainName: "example.com",
-	//}, false)
-	//if err != nil {
-	//	return nil, trace.Wrap(err)
-	//}
-	//certPool, err := services.CertPool(ca)
-	//if err != nil {
-	//	return nil, trace.Wrap(err)
-	//}
-	//tlsConfig := utils.TLSConfig(h.c.CipherSuites)
-	//tlsCert, err := tls.X509KeyPair(session.GetTLSCert(), session.GetPriv())
-	//if err != nil {
-	//	return nil, trace.Wrap(err, "failed to parse TLS cert and key")
-	//}
-	//tlsConfig.Certificates = []tls.Certificate{tlsCert}
-	//tlsConfig.RootCAs = certPool
-	//// TODO(russjones): This might be due to hostname mistmatch?
-	////tlsConfig.InsecureSkipVerify = true
-	////tlsConfig.ServerName = auth.EncodeClusterName("example.com")
-	//cert := tlsConfig.Certificates[0]
-	//tlsConfig.Certificates = nil
-	//tlsConfig.GetClientCertificate = func(_ *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-	//	fmt.Printf("--> sending cert.\n")
-	//	return &cert, nil
-	//}
-	//tlsConfig.ServerName = "server04"
-	////tlsConfig.BuildNameToCertificate()
-	//tr, _ := newTransport(h.c.ProxyClient)
-	//tr.TLSClientConfig = tlsConfig
+func (h *Handler) newTransport(identity *tlsca.Identity, server services.Server, ws services.WebSession) (*http.Transport, error) {
+	var err error
 
 	// Clone the default transport to pick up sensible defaults.
 	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
@@ -231,6 +203,12 @@ func newTransport(proxyClient reversetunnel.Server) (*http.Transport, error) {
 		return nil, trace.BadParameter("invalid transport type %T", http.DefaultTransport)
 	}
 	tr := defaultTransport.Clone()
+
+	// Configure TLS client.
+	tr.TLSClientConfig, err = h.configureTLS(identity, server, ws)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
 
 	// Increase the size of the transports connection pool. This substantially
 	// improves the performance of Teleport under load as it reduces the number
@@ -248,13 +226,7 @@ func newTransport(proxyClient reversetunnel.Server) (*http.Transport, error) {
 	// the connection pool maintained by the transport to differentiate
 	// connections to different application proxy hosts.
 	tr.DialContext = func(ctx context.Context, network string, addr string) (net.Conn, error) {
-		//serverID, clusterName, err := extract(addr)
-		//if err != nil {
-		//	return nil, trace.Wrap(err)
-		//}
-		//clusterClient, err := proxyClient.GetSite(clusterName)
-		clusterClient, err := proxyClient.GetSite("example.com")
-		//clusterClient, err := proxyClient.GetSite("remote.example.com")
+		clusterClient, err := h.c.ProxyClient.GetSite(identity.RouteToApp.ClusterName)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -262,11 +234,9 @@ func newTransport(proxyClient reversetunnel.Server) (*http.Transport, error) {
 		conn, err := clusterClient.Dial(reversetunnel.DialParams{
 			// The "From" and "To" addresses don't mean anything for tunnel dialing,
 			// so they are simply filled out with dummy values.
-			From: &utils.NetAddr{AddrNetwork: "tcp", Addr: "@proxy"},
-			To:   &utils.NetAddr{AddrNetwork: "tcp", Addr: "@app"},
-			//ServerID: fmt.Sprintf("%v.%v", serverID, clusterName),
-			ServerID: "7540982c-06e0-4943-a3b2-7442c1509b37.example.com",
-			//ServerID: "a9c770b9-3b7c-4cbf-99a4-ee1821bfaae0.remote.example.com",
+			From:     &utils.NetAddr{AddrNetwork: "tcp", Addr: "@proxy"},
+			To:       &utils.NetAddr{AddrNetwork: "tcp", Addr: "@app"},
+			ServerID: fmt.Sprintf("%v.%v", server.GetName(), identity.RouteToApp.ClusterName),
 			ConnType: services.AppTunnel,
 		})
 		if err != nil {
@@ -278,21 +248,88 @@ func newTransport(proxyClient reversetunnel.Server) (*http.Transport, error) {
 	return tr, nil
 }
 
-// extract takes an address in the form http://serverID.clusterName:80 and
-// returns serverID and clusterName.
-func extract(address string) (string, string, error) {
-	// Strip port suffix.
-	address = strings.TrimSuffix(address, ":80")
-	address = strings.TrimSuffix(address, ":443")
+// getApp looks for an application registered for the requested public address
+// in the cluster and returns it. In the situation multiple applications match,
+// a random selection is returned. This is done on purpose to support HA to
+// allow multiple application proxy nodes to be run and if one is down, at
+// least the application can be accessible on the other.
+//
+// In the future this function should be updated to keep state on application
+// servers that are down and to not route requests to that server.
+func (h *Handler) getApp(ctx context.Context, publicAddr string) (*services.App, services.Server, error) {
+	var am []*services.App
+	var sm []services.Server
 
-	// Split into two parts: serverID and clusterName.
-	index := strings.Index(address, ".")
-	if index == -1 {
-		return "", "", fmt.Errorf("")
+	servers, err := h.c.AccessPoint.GetAppServers(ctx, defaults.Namespace)
+	if err != nil {
+		return nil, nil, trace.Wrap(err)
+	}
+	for _, server := range servers {
+		for _, app := range server.GetApps() {
+			if app.PublicAddr == publicAddr {
+				am = append(am, app)
+				sm = append(sm, server)
+			}
+		}
 	}
 
-	return address[:index], address[index+1:], nil
+	if len(am) == 0 {
+		return nil, nil, trace.NotFound("%q not found", publicAddr)
+	}
+	index := rand.Intn(len(am))
+	return am[index], sm[index], nil
 }
+
+func (h *Handler) configureTLS(identity *tlsca.Identity, server services.Server, ws services.WebSession) (*tls.Config, error) {
+	// Fetch the CA for the cluster the client is attempting to connect to.
+	ca, err := h.c.AuthClient.GetCertAuthority(services.CertAuthID{
+		Type:       services.HostCA,
+		DomainName: identity.RouteToApp.ClusterName,
+	}, false)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	certPool, err := services.CertPool(ca)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	// Create a client *tls.Config.
+	tlsConfig := utils.TLSConfig(h.c.CipherSuites)
+	tlsCert, err := tls.X509KeyPair(ws.GetTLSCert(), ws.GetPriv())
+	if err != nil {
+		return nil, trace.Wrap(err, "failed to parse TLS cert and key")
+	}
+	tlsConfig.Certificates = []tls.Certificate{tlsCert}
+	tlsConfig.RootCAs = certPool
+	// TODO(russjones): This should really be UUID.
+	tlsConfig.ServerName = server.GetHostname()
+
+	// Is this hack still needed?
+	//cert := tlsConfig.Certificates[0]
+	//tlsConfig.Certificates = nil
+	//tlsConfig.GetClientCertificate = func(_ *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+	//	return &cert, nil
+	//}
+
+	return tlsConfig, nil
+}
+
+//// extract takes an address in the form http://serverID.clusterName:80 and
+//// returns serverID and clusterName.
+//func extract(address string) (string, string, error) {
+//	// Strip port suffix.
+//	address = strings.TrimSuffix(address, ":80")
+//	address = strings.TrimSuffix(address, ":443")
+//
+//	// Split into two parts: serverID and clusterName.
+//	index := strings.Index(address, ".")
+//	if index == -1 {
+//		return "", "", fmt.Errorf("")
+//	}
+//
+//	return address[:index], address[index+1:], nil
+//}
 
 /*
 	//Works with local cluster.

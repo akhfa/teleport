@@ -84,7 +84,6 @@ func (s *Server) newSession(ctx context.Context, identity *tlsca.Identity, app *
 			w:          streamWriter,
 			publicAddr: app.PublicAddr,
 			uri:        app.URI,
-			jwt:        identity.RouteToApp.JWT,
 			tr:         s.tr,
 			log:        s.log,
 		})
@@ -93,7 +92,7 @@ func (s *Server) newSession(ctx context.Context, identity *tlsca.Identity, app *
 	}
 	fwd, err := forward.New(
 		forward.RoundTripper(fwder),
-		forward.Rewriter(fwder),
+		//forward.Rewriter(fwder),
 		forward.Logger(s.log))
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -240,17 +239,17 @@ func (s *Server) newStreamer(ctx context.Context, sessionID string, clusterConfi
 type forwarderConfig struct {
 	publicAddr string
 	uri        string
-	jwt        string
-	tr         http.RoundTripper
-	log        *logrus.Entry
-	w          events.StreamWriter
+	//jwt        string
+	tr  http.RoundTripper
+	log *logrus.Entry
+	w   events.StreamWriter
 }
 
 // Check will valid the configuration of a forwarder.
 func (c *forwarderConfig) Check() error {
-	if c.jwt == "" {
-		return trace.BadParameter("jwt missing")
-	}
+	//if c.jwt == "" {
+	//	return trace.BadParameter("jwt missing")
+	//}
 	if c.uri == "" {
 		return trace.BadParameter("uri missing")
 	}
@@ -322,16 +321,4 @@ func (f *forwarder) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 
 	return resp, nil
-}
-
-// Rewrite request headers to add in JWT header and remove any Teleport
-// related authentication headers.
-func (f *forwarder) Rewrite(r *http.Request) {
-	// Add in JWT headers.
-	r.Header.Add(teleport.AppJWTHeader, f.c.jwt)
-	r.Header.Add(teleport.AppCFHeader, f.c.jwt)
-
-	// Remove the session ID header before forwarding the session to the
-	// target application.
-	r.Header.Del(teleport.AppSessionIDHeader)
 }

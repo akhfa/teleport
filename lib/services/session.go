@@ -17,8 +17,6 @@ limitations under the License.
 package services
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -53,22 +51,28 @@ type WebSession interface {
 	SetPriv([]byte)
 	// GetTLSCert returns PEM encoded TLS certificate associated with session
 	GetTLSCert() []byte
-	// GetSessionID gets the application session ID.
-	GetSessionID() string
-	// SetSessionID sets the application session ID.
-	SetSessionID(string)
-	// GetServerID gets the ID of the server the application is running on.
-	GetServerID() string
-	// GetServerID sets the ID of the server the application is running on.
-	SetServerID(string)
+	//// GetSessionID gets the application session ID.
+	//GetSessionID() string
+	//// SetSessionID sets the application session ID.
+	//SetSessionID(string)
+	//// GetServerID gets the ID of the server the application is running on.
+	//GetServerID() string
+	//// GetServerID sets the ID of the server the application is running on.
+	//SetServerID(string)
 	// GetParentHash gets the hash of the parent session.
-	GetParentHash() string
-	// SetParentHash sets the hash of the parent session.
-	SetParentHash(string)
-	// ClusterName gets the name of the cluster in which the application is running.
-	GetClusterName() string
-	// ClusterName sets the name of the cluster in which the application is running.
-	SetClusterName(string)
+	//GetParentHash() string
+	//// SetParentHash sets the hash of the parent session.
+	//SetParentHash(string)
+	//// ClusterName gets the name of the cluster in which the application is running.
+	//GetClusterName() string
+	//// ClusterName sets the name of the cluster in which the application is running.
+	//SetClusterName(string)
+
+	// GetJWT gets the JWT.
+	GetJWT() string
+	// SetJWT sets the JWT.
+	SetJWT(string)
+
 	// BearerToken is a special bearer token used for additional
 	// bearer authentication
 	GetBearerToken() string
@@ -200,40 +204,50 @@ func (ws *WebSessionV2) GetTLSCert() []byte {
 	return ws.Spec.TLSCert
 }
 
-// GetParentHash gets the hash of the parent session.
-func (ws *WebSessionV2) GetParentHash() string {
-	return ws.Spec.ParentHash
+//// GetParentHash gets the hash of the parent session.
+//func (ws *WebSessionV2) GetParentHash() string {
+//	return ws.Spec.ParentHash
+//}
+//
+//// SetParentHash sets the hash of the parent session.
+//func (ws *WebSessionV2) SetParentHash(parentHash string) {
+//	ws.Spec.ParentHash = parentHash
+//}
+
+//func (ws *WebSessionV2) GetSessionID() string {
+//	return ws.Spec.SessionID
+//}
+//
+//func (ws *WebSessionV2) SetSessionID(sessionID string) {
+//	ws.Spec.SessionID = sessionID
+//}
+//
+//func (ws *WebSessionV2) GetServerID() string {
+//	return ws.Spec.ServerID
+//}
+//
+//func (ws *WebSessionV2) SetServerID(serverID string) {
+//	ws.Spec.ServerID = serverID
+//}
+//
+//// ClusterName gets the name of the cluster in which the application is running.
+//func (ws *WebSessionV2) GetClusterName() string {
+//	return ws.Spec.ClusterName
+//}
+//
+//// ClusterName sets the name of the cluster in which the application is running.
+//func (ws *WebSessionV2) SetClusterName(clusterName string) {
+//	ws.Spec.ClusterName = clusterName
+//}
+
+// GetJWT gets the JWT.
+func (ws *WebSessionV2) GetJWT() string {
+	return ws.Spec.JWT
 }
 
-// SetParentHash sets the hash of the parent session.
-func (ws *WebSessionV2) SetParentHash(parentHash string) {
-	ws.Spec.ParentHash = parentHash
-}
-
-func (ws *WebSessionV2) GetSessionID() string {
-	return ws.Spec.SessionID
-}
-
-func (ws *WebSessionV2) SetSessionID(sessionID string) {
-	ws.Spec.SessionID = sessionID
-}
-
-func (ws *WebSessionV2) GetServerID() string {
-	return ws.Spec.ServerID
-}
-
-func (ws *WebSessionV2) SetServerID(serverID string) {
-	ws.Spec.ServerID = serverID
-}
-
-// ClusterName gets the name of the cluster in which the application is running.
-func (ws *WebSessionV2) GetClusterName() string {
-	return ws.Spec.ClusterName
-}
-
-// ClusterName sets the name of the cluster in which the application is running.
-func (ws *WebSessionV2) SetClusterName(clusterName string) {
-	ws.Spec.ClusterName = clusterName
+// SetJWT sets the JWT.
+func (ws *WebSessionV2) SetJWT(jwt string) {
+	ws.Spec.JWT = jwt
 }
 
 // GetPub is returns public certificate signed by auth server
@@ -303,16 +317,18 @@ const WebSessionSpecV2Schema = `{
     "pub": {"type": "string"},
     "priv": {"type": "string"},
     "tls_cert": {"type": "string"},
-    "public_addr": {"type": "string"},
-    "parent_hash": {"type": "string"},
-    "server_id": {"type": "string"},
-    "cluster_name": {"type": "string"},
-    "session_id": {"type": "string"},
+    "jwt": {"type": "string"},
     "bearer_token": {"type": "string"},
     "bearer_token_expires": {"type": "string"},
     "expires": {"type": "string"}%v
   }
 }`
+
+// "parent_hash": {"type": "string"},
+//"public_addr": {"type": "string"},
+//"server_id": {"type": "string"},
+//"cluster_name": {"type": "string"},
+//"session_id": {"type": "string"},
 
 // WebSession stores key and value used to authenticate with SSH
 // nodes on behalf of user
@@ -569,22 +585,22 @@ func (*TeleportWebSessionMarshaler) MarshalWebSession(ws WebSession, opts ...Mar
 // GetAppWebSessionRequest contains the parameters to request a application
 // web session.
 type GetAppWebSessionRequest struct {
-	// Username is the Teleport identity of the requester.
-	Username string
-	// ParentHash is the hash of the parent session ID.
-	ParentHash string
+	//// Username is the Teleport identity of the requester.
+	//Username string
+	//// ParentHash is the hash of the parent session ID.
+	//ParentHash string
 	// SessionID is the session ID of the application session itself.
 	SessionID string
 }
 
 // Check validates the request.
 func (r *GetAppWebSessionRequest) Check() error {
-	if r.Username == "" {
-		return trace.BadParameter("username missing")
-	}
-	if r.ParentHash == "" {
-		return trace.BadParameter("parent hash missing")
-	}
+	//if r.Username == "" {
+	//	return trace.BadParameter("username missing")
+	//}
+	//if r.ParentHash == "" {
+	//	return trace.BadParameter("parent hash missing")
+	//}
 	if r.SessionID == "" {
 		return trace.BadParameter("session ID missing")
 	}
@@ -598,14 +614,16 @@ type CreateAppWebSessionRequest struct {
 	Username string `json:"username"`
 	// ParentSession is the session ID of the parent session.
 	ParentSession string `json:"parent_session"`
-	// AppSessionID is the ID of the services.AppSession.
-	AppSessionID string `json:"app_session"`
-	// ServerID is the ID of the application session that will forward the request.
-	ServerID string `json:"server_id"`
+	//// AppSessionID is the ID of the services.AppSession.
+	//AppSessionID string `json:"app_session"`
+	//// ServerID is the ID of the application session that will forward the request.
+	//ServerID string `json:"server_id"`
+	// PublicAddr is the public address of the application.
+	PublicAddr string `json:"public_addr"`
 	// ClusterName is the name of the cluster within which the application is running.
 	ClusterName string `json:"cluster_name"`
-	// Expires is the requested expiration of the session.
-	Expires time.Time `json:"expires"`
+	//// Expires is the requested expiration of the session.
+	//Expires time.Time `json:"expires"`
 }
 
 // Check validates the request.
@@ -616,18 +634,18 @@ func (r CreateAppWebSessionRequest) Check() error {
 	if r.ParentSession == "" {
 		return trace.BadParameter("parent session missing")
 	}
-	if r.AppSessionID == "" {
-		return trace.BadParameter("application session ID missing")
-	}
-	if r.ServerID == "" {
-		return trace.BadParameter("server ID missing")
+	//if r.AppSessionID == "" {
+	//	return trace.BadParameter("application session ID missing")
+	//}
+	if r.PublicAddr == "" {
+		return trace.BadParameter("public address missing")
 	}
 	if r.ClusterName == "" {
 		return trace.BadParameter("cluster name missing")
 	}
-	if r.Expires.IsZero() {
-		return trace.BadParameter("expires missing")
-	}
+	//if r.Expires.IsZero() {
+	//	return trace.BadParameter("expires missing")
+	//}
 
 	return nil
 }
@@ -635,17 +653,17 @@ func (r CreateAppWebSessionRequest) Check() error {
 // DeleteAppWebSessionRequest are the parameters used to request removal of
 // an application web session.
 type DeleteAppWebSessionRequest struct {
-	// Username is the Teleport username.
-	Username string `json:"username"`
-	// ParentHash is the hash of the parent session ID.
-	ParentHash string `json:"parent_hash"`
+	//// Username is the Teleport username.
+	//Username string `json:"username"`
+	//// ParentHash is the hash of the parent session ID.
+	//ParentHash string `json:"parent_hash"`
 	// SessionID is the ID of the session.
 	SessionID string `json:"session_id"`
 }
 
-// SessionHash returns hex-encoded SHA256 hash of a session ID. Used by parent
-// session to identify application specific child sessions.
-func SessionHash(sessionID string) string {
-	hash := sha256.Sum256([]byte(sessionID))
-	return hex.EncodeToString(hash[:])
-}
+//// SessionHash returns hex-encoded SHA256 hash of a session ID. Used by parent
+//// session to identify application specific child sessions.
+//func SessionHash(sessionID string) string {
+//	hash := sha256.Sum256([]byte(sessionID))
+//	return hex.EncodeToString(hash[:])
+//}

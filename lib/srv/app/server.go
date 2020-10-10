@@ -353,10 +353,6 @@ func (s *Server) authenticate(ctx context.Context, r *http.Request) (*tlsca.Iden
 		return nil, nil, trace.Wrap(err)
 	}
 	identity := authContext.Identity.GetIdentity()
-	// TODO(russjones): Remove all of this.
-	identity.RouteToApp.PublicAddr = "dumper.example.com"
-	identity.RouteToApp.SessionID = "123"
-	identity.RouteToApp.JWT = "456"
 
 	// Check if the caller has access to the application.
 	app, err := s.getApp(r.Context(), identity.RouteToApp.PublicAddr)
@@ -396,8 +392,8 @@ func copyAndConfigureTLS(config *tls.Config, fn func(*tls.ClientHelloInfo) (*tls
 // request to a target application.
 func (s *Server) newHTTPServer() *http.Server {
 	authMiddleware := &auth.AuthMiddleware{
-		AccessPoint: s.c.AccessPoint,
-		//	AcceptedUsage: []string{teleport.UsageAppsOnly},
+		AccessPoint:   s.c.AccessPoint,
+		AcceptedUsage: []string{teleport.UsageAppsOnly},
 	}
 	authMiddleware.Wrap(s)
 

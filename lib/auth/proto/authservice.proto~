@@ -290,12 +290,12 @@ message DeleteAllAppServersRequest {
 
 // GetAppWebSessionRequest are the parameters used to request an application web session.
 message GetAppWebSessionRequest {
-    //// Username is the identity of the user.
-    // string Username = 1 [ (gogoproto.jsontag) = "username" ];
-    //// ParentHash is the hash of the parent web session.
-    // string ParentHash = 2 [ (gogoproto.jsontag) = "parent_hash" ];
+    // Username is the identity of the user.
+    string Username = 1 [ (gogoproto.jsontag) = "username" ];
+    // ParentHash is the hash of the parent web session.
+    string ParentHash = 2 [ (gogoproto.jsontag) = "parent_hash" ];
     // SessionID is the ID of the session being requested.
-    string SessionID = 1 [ (gogoproto.jsontag) = "session_id" ];
+    string SessionID = 3 [ (gogoproto.jsontag) = "session_id" ];
 }
 
 // GetAppWebSessionResponse contains the requested application web session.
@@ -312,14 +312,10 @@ message GetAppWebSessionsResponse {
 
 // CreateAppWebSessionRequest contains the parameters to request a application web session.
 message CreateAppWebSessionRequest {
-    // Username is the name of the user requesting the session.
-    string Username = 1 [ (gogoproto.jsontag) = "username" ];
-    // ParentSession is the session ID of the parent session.
-    string ParentSession = 2 [ (gogoproto.jsontag) = "parent_session" ];
     // PublicAddr is the public address the application.
-    string PublicAddr = 3 [ (gogoproto.jsontag) = "public_addr" ];
+    string PublicAddr = 1 [ (gogoproto.jsontag) = "public_addr" ];
     // ClusterName is cluster within which the application is running.
-    string ClusterName = 4 [ (gogoproto.jsontag) = "cluster_name" ];
+    string ClusterName = 2 [ (gogoproto.jsontag) = "cluster_name" ];
     //// Expires is the requested expiration of the session.
     // google.protobuf.Timestamp Expires = 6 [
     //    (gogoproto.stdtime) = true,
