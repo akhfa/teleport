@@ -94,6 +94,7 @@ type Identity struct {
 }
 
 type AppRoute struct {
+	SessionID   string
 	ServerID    string
 	PublicAddr  string
 	ClusterName string

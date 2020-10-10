@@ -31,6 +31,8 @@ import (
 	"github.com/gravitational/teleport/lib/events/filesessions"
 	"github.com/gravitational/teleport/lib/services"
 	session_pkg "github.com/gravitational/teleport/lib/session"
+	"github.com/gravitational/teleport/lib/tlsca"
+	"github.com/gravitational/teleport/lib/utils"
 	"github.com/gravitational/trace"
 
 	"github.com/pborman/uuid"
@@ -45,23 +47,23 @@ type session struct {
 // getSession returns a request session used to proxy the request to the
 // target application. Always checks if the session is valid first and if so,
 // will return a cached session, otherwise will create one.
-func (s *Server) getSession(ctx context.Context, appSession services.AppSession) (*session, error) {
+func (s *Server) getSession(ctx context.Context, identity *tlsca.Identity, app *services.App) (*session, error) {
 	// If a cached forwarder exists, return it right away.
-	session, err := s.cacheGet(appSession.GetName())
+	session, err := s.cacheGet(identity.RouteToApp.SessionID)
 	if err == nil {
 		return session, nil
 	}
 
 	// Create a new session with a recorder and forwarder in it.
-	session, err = s.newSession(ctx, appSession)
+	session, err = s.newSession(ctx, identity, app)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	// Put the session in the cache so the next request can use it.
-	// TODO(russjones): Make this smaller of now+5 mins or expiry time.
-	//err = s.cacheSet(session.GetName(), session, session.Expiry().Sub(s.c.Clock.Now()))
-	err = s.cacheSet(appSession.GetName(), session, 60*time.Second)
+	// Put the session in the cache so the next request can use it for 5 minutes
+	// or the time until the certificate expires, whichever comes first.
+	ttl := utils.MinTTL(identity.Expires.Sub(s.c.Clock.Now()), 5*time.Minute)
+	err = s.cacheSet(identity.RouteToApp.SessionID, session, ttl)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -69,15 +71,9 @@ func (s *Server) getSession(ctx context.Context, appSession services.AppSession)
 	return session, nil
 }
 
-func (s *Server) newSession(ctx context.Context, appSession services.AppSession) (*session, error) {
-	// Locally lookup the application the caller is targeting.
-	app, err := s.getApp(ctx, appSession.GetPublicAddr())
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-
+func (s *Server) newSession(ctx context.Context, identity *tlsca.Identity, app *services.App) (*session, error) {
 	// Create the stream writer that will write this chunk to the audit log.
-	streamWriter, err := s.newStreamWriter(appSession)
+	streamWriter, err := s.newStreamWriter(identity)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -88,7 +84,7 @@ func (s *Server) newSession(ctx context.Context, appSession services.AppSession)
 			w:          streamWriter,
 			publicAddr: app.PublicAddr,
 			uri:        app.URI,
-			jwt:        appSession.GetJWT(),
+			jwt:        identity.RouteToApp.JWT,
 			tr:         s.tr,
 			log:        s.log,
 		})
@@ -165,7 +161,7 @@ func (s *Server) cacheExpire(key string, el interface{}) {
 	s.log.Debugf("Closing expired stream %v.", key)
 }
 
-func (s *Server) newStreamWriter(appSession services.AppSession) (events.StreamWriter, error) {
+func (s *Server) newStreamWriter(identity *tlsca.Identity) (events.StreamWriter, error) {
 	clusterConfig, err := s.c.AccessPoint.GetClusterConfig()
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -206,7 +202,7 @@ func (s *Server) newStreamWriter(appSession services.AppSession) (events.StreamW
 			ServerNamespace: defaults.Namespace,
 		},
 		SessionMetadata: events.SessionMetadata{
-			SessionID: appSession.GetName(),
+			SessionID: identity.RouteToApp.SessionID,
 		},
 		SessionChunkID: sessionUUID,
 	}
@@ -238,10 +234,6 @@ func (s *Server) newStreamer(ctx context.Context, sessionID string, clusterConfi
 		return nil, trace.Wrap(err)
 	}
 	return fileStreamer, nil
-	//// TeeStreamer sends non-print and non disk events
-	//// to the audit log in async mode, while buffering all
-	//// events on disk for further upload at the end of the session
-	//return events.NewTeeStreamer(fileStreamer, s.c.AuthClient), nil
 }
 
 // forwarderConfig is the configuration for a forwarder.
