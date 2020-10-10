@@ -152,7 +152,7 @@ func (a *AuthServer) ValidateGithubAuthCallback(q url.Values) (*GithubAuthRespon
 		a.emitter.EmitAuditEvent(a.closeCtx, event)
 		return nil, trace.Wrap(err)
 	}
-	event.Code = events.UserSSOLoginFailureCode
+	event.Code = events.UserSSOLoginCode
 	event.Status.Success = true
 	event.User = re.auth.Username
 	if err := a.emitter.EmitAuditEvent(a.closeCtx, event); err != nil {
