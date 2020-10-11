@@ -56,3 +56,6 @@ terraform.tfstate
 # ansible stuff
 ssh.config
 *.retry
+/.blackbox/pubring.gpg~
+/.blackbox/pubring.kbx~
+/.blackbox/secring.gpg
