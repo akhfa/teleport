@@ -1,0 +1,1 @@
+examples/aws/terraform/ha-autoscale-cluster/vars.auto.tfvars

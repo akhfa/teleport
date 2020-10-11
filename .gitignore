@@ -59,3 +59,4 @@ ssh.config
 /.blackbox/pubring.gpg~
 /.blackbox/pubring.kbx~
 /.blackbox/secring.gpg
+/examples/aws/terraform/ha-autoscale-cluster/vars.auto.tfvars
