@@ -43,6 +43,7 @@ import (
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/events"
 	"github.com/gravitational/teleport/lib/httplib"
+	"github.com/gravitational/teleport/lib/jwt"
 	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/session"
 	"github.com/gravitational/teleport/lib/utils"
@@ -3112,6 +3113,25 @@ func (c *Client) DeleteAllAppWebSessions(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (c *Client) GenerateJWT(ctx context.Context, req jwt.SignParams) (string, error) {
+	clt, err := c.grpc()
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+
+	resp, err := clt.GenerateJWT(ctx, &proto.GenerateJWTRequest{
+		Username: req.Username,
+		Roles:    req.Roles,
+		URI:      req.URI,
+		Expires:  req.Expires,
+	})
+	if err != nil {
+		return "", trail.FromGRPC(err)
+	}
+
+	return resp.GetJWT(), nil
 }
 
 // GetAppSession gets an application session.

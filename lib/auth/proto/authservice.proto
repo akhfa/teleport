@@ -288,6 +288,19 @@ message DeleteAllAppServersRequest {
     string Namespace = 1 [ (gogoproto.jsontag) = "namespace" ];
 }
 
+message GenerateJWTRequest {
+    string Username = 1 [ (gogoproto.jsontag) = "username" ];
+    repeated string Roles = 2 [ (gogoproto.jsontag) = "roles" ];
+    string URI = 3 [ (gogoproto.jsontag) = "uri" ];
+    google.protobuf.Timestamp Expires = 4 [
+        (gogoproto.stdtime) = true,
+        (gogoproto.nullable) = false,
+        (gogoproto.jsontag) = "expires"
+    ];
+}
+
+message GenerateJWTResponse { string JWT = 1 [ (gogoproto.jsontag) = "jwt" ]; }
+
 // GetAppWebSessionRequest are the parameters used to request an application web session.
 message GetAppWebSessionRequest {
     //// Username is the identity of the user.
@@ -437,6 +450,8 @@ service AuthService {
     rpc DeleteAppServer(DeleteAppServerRequest) returns (google.protobuf.Empty);
     // DeleteAllAppServers removes all application servers.
     rpc DeleteAllAppServers(DeleteAllAppServersRequest) returns (google.protobuf.Empty);
+
+    rpc GenerateJWT(GenerateJWTRequest) returns (GenerateJWTResponse);
 
     // GetAppWebSession gets an application web session.
     rpc GetAppWebSession(GetAppWebSessionRequest) returns (GetAppWebSessionResponse);

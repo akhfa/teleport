@@ -29,6 +29,7 @@ import (
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/events"
 	"github.com/gravitational/teleport/lib/events/filesessions"
+	"github.com/gravitational/teleport/lib/jwt"
 	"github.com/gravitational/teleport/lib/services"
 	session_pkg "github.com/gravitational/teleport/lib/session"
 	"github.com/gravitational/teleport/lib/tlsca"
@@ -78,12 +79,23 @@ func (s *Server) newSession(ctx context.Context, identity *tlsca.Identity, app *
 		return nil, trace.Wrap(err)
 	}
 
+	jwt, err := s.c.AuthClient.GenerateJWT(ctx, jwt.SignParams{
+		Username: identity.Username,
+		Roles:    identity.Groups,
+		URI:      app.URI,
+		Expires:  identity.Expires,
+	})
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
 	// Create the forwarder.
 	fwder, err := newForwarder(s.closeContext,
 		&forwarderConfig{
 			w:          streamWriter,
 			publicAddr: app.PublicAddr,
 			uri:        app.URI,
+			jwt:        jwt,
 			tr:         s.tr,
 			log:        s.log,
 		})
@@ -92,7 +104,7 @@ func (s *Server) newSession(ctx context.Context, identity *tlsca.Identity, app *
 	}
 	fwd, err := forward.New(
 		forward.RoundTripper(fwder),
-		//forward.Rewriter(fwder),
+		forward.Rewriter(fwder),
 		forward.Logger(s.log))
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -239,17 +251,17 @@ func (s *Server) newStreamer(ctx context.Context, sessionID string, clusterConfi
 type forwarderConfig struct {
 	publicAddr string
 	uri        string
-	//jwt        string
-	tr  http.RoundTripper
-	log *logrus.Entry
-	w   events.StreamWriter
+	jwt        string
+	tr         http.RoundTripper
+	log        *logrus.Entry
+	w          events.StreamWriter
 }
 
 // Check will valid the configuration of a forwarder.
 func (c *forwarderConfig) Check() error {
-	//if c.jwt == "" {
-	//	return trace.BadParameter("jwt missing")
-	//}
+	if c.jwt == "" {
+		return trace.BadParameter("jwt missing")
+	}
 	if c.uri == "" {
 		return trace.BadParameter("uri missing")
 	}
@@ -272,6 +284,7 @@ type forwarder struct {
 	c *forwarderConfig
 
 	uri *url.URL
+	jwt string
 }
 
 // newForwarder creates a new forwarder that can re-write and round trip a
@@ -321,4 +334,10 @@ func (f *forwarder) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 
 	return resp, nil
+}
+
+func (f *forwarder) Rewrite(r *http.Request) {
+	// Add in JWT headers.
+	r.Header.Add(teleport.AppJWTHeader, f.c.jwt)
+	r.Header.Add(teleport.AppCFHeader, f.c.jwt)
 }

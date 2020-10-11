@@ -26,7 +26,7 @@ import (
 	"net/url"
 
 	"github.com/gravitational/oxy/forward"
-	"github.com/gravitational/teleport"
+	"github.com/gravitational/teleport/lib/auth"
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/reversetunnel"
 	"github.com/gravitational/teleport/lib/services"
@@ -73,7 +73,21 @@ func (h *Handler) newSession(ctx context.Context, ws services.WebSession) (*sess
 		return nil, trace.Wrap(err)
 	}
 
-	_, server, err := h.getApp(ctx, identity.RouteToApp.PublicAddr)
+	// This is a reasonably costly call, it gets all applications from a remote
+	// cluster. However, it happens infrequently, it happens you are creating a
+	// new session.
+	//
+	// one alternative is to hardcode the servers to route the request to
+	// within the certificate.
+	clusterClient, err := h.c.ProxyClient.GetSite(identity.RouteToApp.ClusterName)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	accessPoint, err := clusterClient.CachingAccessPoint()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	_, server, err := getApp(ctx, accessPoint, identity.RouteToApp.PublicAddr)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -87,7 +101,7 @@ func (h *Handler) newSession(ctx context.Context, ws services.WebSession) (*sess
 	// Create the forwarder.
 	fwder, err := newForwarder(forwarderConfig{
 		uri: fmt.Sprintf("https://%v.%v", server.GetName(), identity.RouteToApp.ClusterName),
-		jwt: ws.GetJWT(),
+		//jwt: ws.GetJWT(),
 		tr:  transport,
 		log: h.log,
 	})
@@ -110,7 +124,7 @@ func (h *Handler) newSession(ctx context.Context, ws services.WebSession) (*sess
 // forwarderConfig is the configuration for a forwarder.
 type forwarderConfig struct {
 	uri string
-	jwt string
+	//jwt string
 	tr  http.RoundTripper
 	log *logrus.Entry
 }
@@ -120,9 +134,9 @@ func (c forwarderConfig) Check() error {
 	if c.uri == "" {
 		return trace.BadParameter("uri missing")
 	}
-	if c.jwt == "" {
-		return trace.BadParameter("jwt missing")
-	}
+	//if c.jwt == "" {
+	//	return trace.BadParameter("jwt missing")
+	//}
 	if c.tr == nil {
 		return trace.BadParameter("round tripper missing")
 	}
@@ -173,9 +187,9 @@ func (f *forwarder) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func (f *forwarder) Rewrite(r *http.Request) {
-	// Add in JWT headers.
-	r.Header.Add(teleport.AppJWTHeader, f.c.jwt)
-	r.Header.Add(teleport.AppCFHeader, f.c.jwt)
+	//// Add in JWT headers.
+	//r.Header.Add(teleport.AppJWTHeader, f.c.jwt)
+	//r.Header.Add(teleport.AppCFHeader, f.c.jwt)
 
 	// Remove the application specific session cookie from the header. This is
 	// done by first wiping out the "Cookie" header then adding back all cookies
@@ -240,6 +254,7 @@ func (h *Handler) newTransport(identity *tlsca.Identity, server services.Server,
 			ConnType: services.AppTunnel,
 		})
 		if err != nil {
+			fmt.Printf("--> here: %v.\n", err)
 			return nil, trace.Wrap(err)
 		}
 		return conn, nil
@@ -256,11 +271,11 @@ func (h *Handler) newTransport(identity *tlsca.Identity, server services.Server,
 //
 // In the future this function should be updated to keep state on application
 // servers that are down and to not route requests to that server.
-func (h *Handler) getApp(ctx context.Context, publicAddr string) (*services.App, services.Server, error) {
+func getApp(ctx context.Context, accessPoint auth.AccessPoint, publicAddr string) (*services.App, services.Server, error) {
 	var am []*services.App
 	var sm []services.Server
 
-	servers, err := h.c.AccessPoint.GetAppServers(ctx, defaults.Namespace)
+	servers, err := accessPoint.GetAppServers(ctx, defaults.Namespace)
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}

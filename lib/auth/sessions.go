@@ -93,20 +93,21 @@ func (s *AuthServer) CreateAppWebSession(ctx context.Context, req services.Creat
 		return nil, trace.Wrap(err)
 	}
 
-	app, _, err := s.getApp(ctx, req.PublicAddr)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
+	///app, _, err := s.getApp(ctx, req.PublicAddr)
+	///if err != nil {
+	///	return nil, trace.Wrap(err)
+	///}
 
 	// Don't let the TTL of the child certificate go longer than the parent.
 	ttl := checker.AdjustSessionTTL(parentSession.GetExpiryTime().Sub(s.clock.Now()))
 
-	// Generate a JWT that can be re-used during the lifetime of this
-	// session to pass authentication information to the target application.
-	jwt, err := s.generateJWT(user.GetName(), user.GetRoles(), app.URI, parentSession.GetExpiryTime())
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
+	//// Generate a JWT that can be re-used during the lifetime of this
+	//// session to pass authentication information to the target application.
+	//jwt, err := s.generateJWT(user.GetName(), user.GetRoles(), app.URI, parentSession.GetExpiryTime())
+	//if err != nil {
+	//	return nil, trace.Wrap(err)
+	//}
+	jwt := "123"
 
 	// Generate certificate for this session.
 	privateKey, publicKey, err := s.GetNewKeyPairFromPool()
